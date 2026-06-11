@@ -2,6 +2,8 @@
 
 _Last updated: 2026-06-11_
 
+> **EN TL;DR** — A tiny Swift LaunchAgent that keeps a SwitchResX-overclocked Apple Studio Display (5K @ 86.5 Hz on M1 Pro) at max refresh automatically: re-applies the overclocked mode on hotplug / login / wake, and switches to a 4K 120 Hz gaming profile while Riot Client / League of Legends is running. No private APIs — once SwitchResX's daemon has injected the custom modes into the system mode table, switching is plain `CGConfigureDisplayWithDisplayMode`. The README below (Chinese) also documents how SwitchResX actually works on Apple Silicon (EDID replacement + `.mtdd` multi-tile timing overrides + runtime mode-table injection via private CoreDisplay/SkyLight APIs), reverse-engineered from a live system. Adapt the vendor/product IDs and mode specs at the top of `autohz.swift` for your own setup.
+
 让被 SwitchResX 超频到 86.5Hz 的 Studio Display(5K)在每次插入 / 开机 / 唤醒时自动回到最高刷新率,不再需要手动打开 SwitchResX 切换。并且**感知游戏**:Riot Client / League of Legends 任一在运行时自动切 4K 120Hz(HiDPI),全部退出后自动切回 5K 86.5Hz。
 
 ## 用法
