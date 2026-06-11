@@ -2,7 +2,7 @@
 
 _Last updated: 2026-06-11_
 
-让被 SwitchResX 超频到 86.5Hz 的 Studio Display(5K)在每次插入 / 开机 / 唤醒时自动回到最高刷新率,不再需要手动打开 SwitchResX 切换。
+让被 SwitchResX 超频到 86.5Hz 的 Studio Display(5K)在每次插入 / 开机 / 唤醒时自动回到最高刷新率,不再需要手动打开 SwitchResX 切换。并且**感知游戏**:Riot Client / League of Legends 任一在运行时自动切 4K 120Hz(HiDPI),全部退出后自动切回 5K 86.5Hz。
 
 ## 用法
 
@@ -17,7 +17,14 @@ studio-display-autohz enforce  # 手动一次性切换
 
 日志:`~/Library/Logs/studio-display-autohz.log`
 
-工作方式:LaunchAgent 常驻一个 watcher,在 ① 启动时 ② `CGDisplayReconfigurationCallback` 报告目标显示器(vendor `0x610` / product `0xae42`)接入时 ③ 系统唤醒时,从公开 CoreGraphics 模式表里选出 5120×2880 HiDPI、刷新率 ≥80Hz 的最高刷新模式,用 `CGConfigureDisplayWithDisplayMode(..., .permanently)` 应用。接入后会在 +2s/+8s/+20s 重试三次,因为 SwitchResX daemon 注入完整模式表略有延迟。**不依赖、也不调用 SwitchResX**——只要它的 override 还装着(模式在系统模式表里),本工具就能切。
+工作方式:LaunchAgent 常驻一个 watcher,在 ① 启动时 ② `CGDisplayReconfigurationCallback` 报告目标显示器(vendor `0x610` / product `0xae42`)接入时 ③ 系统唤醒时 ④ 游戏 app 启动/退出时,按当前期望 profile 选模式,用 `CGConfigureDisplayWithDisplayMode(..., .permanently)` 应用:
+
+- **办公 profile(默认)**:5120×2880 HiDPI、≥80Hz 里刷新最高的(= 86.5)
+- **游戏 profile**(`com.riotgames.RiotGames.RiotClient` 或 `com.riotgames.leagueoflegends` 任一在跑):3840×2160 HiDPI、≥100Hz(= 4K120)。把游戏本体也算进触发集合,是防止打到一半客户端退出导致屏幕中途切回 5K。
+
+接入后会在 +2s/+8s/+20s 重试三次,因为 SwitchResX daemon 注入完整模式表略有延迟;游戏退出后在 +1s/+5s/+12s 重查三次,因为 macOS 的 `didTerminateApplicationNotification` 触发时退出中的进程还会在 `runningApplications` 里赖几秒(实测 Riot 残留 1~5s,会导致立即判定误判)。**不依赖、也不调用 SwitchResX**——只要它的 override 还装着(模式在系统模式表里),本工具就能切。
+
+注意:SwitchResX 的**无头 daemon**(`SwitchResX Daemon.app`,LSUIElement,无任何可见 UI)需要保持登录自启,因为 86.5 模式是它在运行时注入模式表的;但菜单栏的 SwitchResX Control 和设置面板永远不用打开。实测 daemon 自己启动时会应用一个它记忆的"默认模式"(曾把屏幕设成 1080p120),本 watcher 会在 ~1s 内纠正。拔掉外接屏时无需任何动作——MacBook Pro 内置屏是 ProMotion 自适应 120Hz,一直处于最高能力状态。
 
 ## SwitchResX 在 Apple Silicon 上的超频原理(实地逆向结论,2026-06-11)
 

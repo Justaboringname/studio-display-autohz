@@ -16,9 +16,36 @@ import Foundation
 
 let targetVendor: UInt32 = 0x610   // Apple
 let targetModel: UInt32 = 0xae42   // SwitchResX-overridden product ID of the Studio Display
-let pixelW = 5120, pixelH = 2880   // full 5K
-let pointW = 2560                  // HiDPI ("Retina") desktop size
-let minHz = 80.0                   // anything >= this counts as the overclocked mode
+
+struct ModeSpec {
+    let name: String
+    let pixelW: Int, pixelH: Int   // wire resolution
+    let pointW: Int                // desktop size in points (pointW < pixelW means HiDPI)
+    let minHz: Double              // lowest acceptable declared refresh
+}
+
+// Office: full 5K HiDPI at the SwitchResX-overclocked ~86.5 Hz.
+let productivitySpec = ModeSpec(name: "5K", pixelW: 5120, pixelH: 2880, pointW: 2560, minHz: 80)
+// Gaming: 4K 120 Hz, HiDPI (desktop "looks like" 1920x1080; fullscreen games
+// pick their own resolution regardless). For 1:1 pixels use pointW: 3840.
+let gamingSpec = ModeSpec(name: "4K120", pixelW: 3840, pixelH: 2160, pointW: 1920, minHz: 100)
+
+// While any of these apps is running, gamingSpec wins. The League client and
+// the game itself are separate processes — covering both means the display
+// stays at 4K120 even if the client quits mid-game.
+let gamingBundleIDs: Set<String> = [
+    "com.riotgames.RiotGames.RiotClient",
+    "com.riotgames.leagueoflegends",
+]
+
+func gamingActive() -> Bool {
+    NSWorkspace.shared.runningApplications.contains {
+        if let bid = $0.bundleIdentifier { return gamingBundleIDs.contains(bid) }
+        return false
+    }
+}
+
+func desiredSpec() -> ModeSpec { gamingActive() ? gamingSpec : productivitySpec }
 // Enforcement runs several times after a hotplug because the SwitchResX daemon
 // re-injects its mode table a few seconds after the display attaches; an early
 // pass may only see the timings from the on-disk .mtdd override.
@@ -63,12 +90,12 @@ func allModes(_ did: CGDirectDisplayID) -> [CGDisplayMode] {
     return (CGDisplayCopyAllDisplayModes(did, opts) as? [CGDisplayMode]) ?? []
 }
 
-func findBestMode(_ did: CGDirectDisplayID) -> CGDisplayMode? {
+func findBestMode(_ did: CGDirectDisplayID, _ spec: ModeSpec) -> CGDisplayMode? {
     allModes(did)
         .filter {
-            $0.pixelWidth == pixelW && $0.pixelHeight == pixelH
-                && $0.width == pointW                      // HiDPI variant only
-                && $0.refreshRate >= minHz
+            $0.pixelWidth == spec.pixelW && $0.pixelHeight == spec.pixelH
+                && $0.width == spec.pointW
+                && $0.refreshRate >= spec.minHz
                 && $0.isUsableForDesktopGUI()
         }
         // Highest refresh first; tie-break on lowest mode ID for stability
@@ -93,16 +120,17 @@ func enforce(reason: String) -> Bool {
         log("enforce(\(reason)): target display not online")
         return false
     }
-    guard let target = findBestMode(did) else {
-        log("enforce(\(reason)): no >=\(minHz)Hz 5K HiDPI mode in the list (SwitchResX override not loaded yet?)")
+    let spec = desiredSpec()
+    guard let target = findBestMode(did, spec) else {
+        log("enforce(\(reason)): no \(spec.name) (>=\(spec.minHz)Hz) mode in the list (SwitchResX daemon not injected yet?)")
         return false
     }
     guard let current = CGDisplayCopyDisplayMode(did) else { return false }
     if current.ioDisplayModeID == target.ioDisplayModeID {
-        log("enforce(\(reason)): already at \(describe(current))")
+        log("enforce(\(reason)): already at \(spec.name) \(describe(current))")
         return true
     }
-    log("enforce(\(reason)): switching \(describe(current)) -> \(describe(target))")
+    log("enforce(\(reason)): [\(spec.name)] switching \(describe(current)) -> \(describe(target))")
     var config: CGDisplayConfigRef?
     guard CGBeginDisplayConfiguration(&config) == .success,
           CGConfigureDisplayWithDisplayMode(config, did, target, nil) == .success else {
@@ -145,6 +173,29 @@ func watch() {
         scheduleEnforces(reason: "wake")
     }
 
+    // Game-aware switching: 4K120 while the Riot client / LoL runs, 5K when done.
+    for (name, event) in [(NSWorkspace.didLaunchApplicationNotification, "app-launch"),
+                          (NSWorkspace.didTerminateApplicationNotification, "app-quit")] {
+        NSWorkspace.shared.notificationCenter.addObserver(
+            forName: name, object: nil, queue: .main
+        ) { note in
+            guard let app = note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication,
+                  let bid = app.bundleIdentifier, gamingBundleIDs.contains(bid) else { return }
+            log("watch: \(event) \(bid)")
+            if event == "app-launch" {
+                enforce(reason: event)
+            } else {
+                // The quitting app can linger in runningApplications for a
+                // moment after didTerminate fires — re-check after a beat.
+                for delay in [1.0, 5.0, 12.0] {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
+                        enforce(reason: "\(event)+\(Int(delay))s")
+                    }
+                }
+            }
+        }
+    }
+
     // Background agents must pump the AppKit run loop to receive NSWorkspace
     // notifications (CFRunLoopRun alone is not enough).
     let app = NSApplication.shared
@@ -159,17 +210,19 @@ func status() {
         print("target display (vendor 0x610 model 0xae42) not online")
         return
     }
+    let spec = desiredSpec()
     print("display \(did) online, main=\(CGDisplayIsMain(did) != 0)")
+    print("gaming apps running: \(gamingActive()) -> desired profile: \(spec.name)")
     if let cur = CGDisplayCopyDisplayMode(did) {
         print("current: \(describe(cur))")
     }
-    if let best = findBestMode(did) {
+    if let best = findBestMode(did, spec) {
         print("target:  \(describe(best))")
     } else {
-        print("target:  no >=\(minHz)Hz 5K HiDPI mode found")
+        print("target:  no \(spec.name) (>=\(spec.minHz)Hz) mode found")
     }
-    print("\nall 5120x2880 + >=\(Int(minHz))Hz modes:")
-    for m in allModes(did) where m.pixelWidth == pixelW || m.refreshRate >= minHz {
+    print("\nall 5K + 4K + >=80Hz modes:")
+    for m in allModes(did) where m.pixelWidth >= 3840 || m.refreshRate >= 80 {
         print("  \(describe(m)) usable=\(m.isUsableForDesktopGUI())")
     }
 }
