@@ -26,9 +26,12 @@ struct ModeSpec {
 
 // Office: full 5K HiDPI at the SwitchResX-overclocked ~86.5 Hz.
 let productivitySpec = ModeSpec(name: "5K", pixelW: 5120, pixelH: 2880, pointW: 2560, minHz: 80)
-// Gaming: 4K 120 Hz, HiDPI (desktop "looks like" 1920x1080; fullscreen games
-// pick their own resolution regardless). For 1:1 pixels use pointW: 3840.
-let gamingSpec = ModeSpec(name: "4K120", pixelW: 3840, pixelH: 2160, pointW: 1920, minHz: 100)
+// Gaming: 2560x1440 @ 120 Hz, 1x — the only 120 Hz mode whose desktop size
+// matches the office profile (2560x1440 points). Non-Retina, but the panel
+// upscales 2x integer and the game renders 1440p either way. There is no
+// 5120x2880-backed 120 Hz mode in the table (the display engine tops out at
+// ~86.5 Hz for 5K, which is the whole point of this tool).
+let gamingSpec = ModeSpec(name: "1440p120", pixelW: 2560, pixelH: 1440, pointW: 2560, minHz: 100)
 
 // While any of these apps is running, gamingSpec wins. The League client and
 // the game itself are separate processes — covering both means the display

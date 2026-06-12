@@ -4,7 +4,7 @@ _Last updated: 2026-06-11_
 
 > **EN TL;DR** — A tiny Swift LaunchAgent that keeps a SwitchResX-overclocked Apple Studio Display (5K @ 86.5 Hz on M1 Pro) at max refresh automatically: re-applies the overclocked mode on hotplug / login / wake, and switches to a 4K 120 Hz gaming profile while Riot Client / League of Legends is running. No private APIs — once SwitchResX's daemon has injected the custom modes into the system mode table, switching is plain `CGConfigureDisplayWithDisplayMode`. The README below (Chinese) also documents how SwitchResX actually works on Apple Silicon (EDID replacement + `.mtdd` multi-tile timing overrides + runtime mode-table injection via private CoreDisplay/SkyLight APIs), reverse-engineered from a live system. Adapt the vendor/product IDs and mode specs at the top of `autohz.swift` for your own setup.
 
-让被 SwitchResX 超频到 86.5Hz 的 Studio Display(5K)在每次插入 / 开机 / 唤醒时自动回到最高刷新率,不再需要手动打开 SwitchResX 切换。并且**感知游戏**:Riot Client / League of Legends 任一在运行时自动切 4K 120Hz(HiDPI),全部退出后自动切回 5K 86.5Hz。
+让被 SwitchResX 超频到 86.5Hz 的 Studio Display(5K)在每次插入 / 开机 / 唤醒时自动回到最高刷新率,不再需要手动打开 SwitchResX 切换。并且**感知游戏**:Riot Client / League of Legends 任一在运行时自动切 2560×1440 @ 120Hz,全部退出后自动切回 5K 86.5Hz。
 
 ## 用法
 
@@ -22,7 +22,7 @@ studio-display-autohz enforce  # 手动一次性切换
 工作方式:LaunchAgent 常驻一个 watcher,在 ① 启动时 ② `CGDisplayReconfigurationCallback` 报告目标显示器(vendor `0x610` / product `0xae42`)接入时 ③ 系统唤醒时 ④ 游戏 app 启动/退出时,按当前期望 profile 选模式,用 `CGConfigureDisplayWithDisplayMode(..., .permanently)` 应用:
 
 - **办公 profile(默认)**:5120×2880 HiDPI、≥80Hz 里刷新最高的(= 86.5)
-- **游戏 profile**(`com.riotgames.RiotGames.RiotClient` 或 `com.riotgames.leagueoflegends` 任一在跑):3840×2160 HiDPI、≥100Hz(= 4K120)。把游戏本体也算进触发集合,是防止打到一半客户端退出导致屏幕中途切回 5K。
+- **游戏 profile**(`com.riotgames.RiotGames.RiotClient` 或 `com.riotgames.leagueoflegends` 任一在跑):2560×1440 @ 120Hz(1x 直出)。选它而不是 4K120 HiDPI,是因为后者桌面逻辑尺寸变成 1920×1080(UI 变大、游戏内分辨率基准跟着变),而 2560×1440@120 与办公 profile 逻辑尺寸完全一致;模式表里不存在 5K 背板的 120Hz 模式(display engine 5K 上限 ~86.5Hz,正是本工具的由来),这是唯一的 2560@120。代价是游戏期间桌面为非 Retina(2 倍整数放大,游戏画面无感)。把游戏本体也算进触发集合,是防止打到一半客户端退出导致屏幕中途切回 5K。
 
 接入后会在 +2s/+8s/+20s 重试三次,因为 SwitchResX daemon 注入完整模式表略有延迟;游戏退出后在 +1s/+5s/+12s 重查三次,因为 macOS 的 `didTerminateApplicationNotification` 触发时退出中的进程还会在 `runningApplications` 里赖几秒(实测 Riot 残留 1~5s,会导致立即判定误判)。**不依赖、也不调用 SwitchResX**——只要它的 override 还装着(模式在系统模式表里),本工具就能切。
 

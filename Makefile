@@ -11,7 +11,9 @@ install: $(BIN)
 	cp $(BIN) $(PREFIX)/$(BIN)
 	sed "s|__BIN__|$(PREFIX)/$(BIN)|" $(PLIST).template > $(AGENT_DIR)/$(PLIST)
 	launchctl bootout gui/$$(id -u)/com.justaboringname.studio-display-autohz 2>/dev/null || true
-	launchctl bootstrap gui/$$(id -u) $(AGENT_DIR)/$(PLIST)
+	sleep 1
+	launchctl bootstrap gui/$$(id -u) $(AGENT_DIR)/$(PLIST) || \
+		{ sleep 2; launchctl bootstrap gui/$$(id -u) $(AGENT_DIR)/$(PLIST); }
 	@echo "installed + agent loaded"
 
 uninstall:
