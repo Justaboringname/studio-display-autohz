@@ -53,6 +53,12 @@ func desiredSpec() -> ModeSpec { gamingActive() ? gamingSpec : productivitySpec 
 // re-injects its mode table a few seconds after the display attaches; an early
 // pass may only see the timings from the on-disk .mtdd override.
 let enforceDelays: [Double] = [2, 8, 20]
+// The daemon's injection can also take minutes (observed 2026-06-12: ~2-3 min
+// after an attach event, and not at all until the next attach if the daemon
+// itself started late). When every fixed-delay pass misses, keep polling until
+// the mode shows up instead of leaving the display stuck on a fallback mode.
+let pollInterval: Double = 30
+let pollMaxTicks = 20   // give up after 10 min; any later event re-arms polling
 
 // MARK: - Logging
 
@@ -146,10 +152,27 @@ func enforce(reason: String) -> Bool {
     return err == .success
 }
 
+var pollTimer: Timer?
+
+func startPolling(reason: String) {
+    guard pollTimer == nil else { return }
+    log("poll(\(reason)): target mode still missing, retrying every \(Int(pollInterval))s")
+    var ticks = 0
+    pollTimer = Timer.scheduledTimer(withTimeInterval: pollInterval, repeats: true) { timer in
+        ticks += 1
+        if enforce(reason: "\(reason)+poll\(ticks)") || ticks >= pollMaxTicks {
+            timer.invalidate()
+            pollTimer = nil
+        }
+    }
+}
+
 func scheduleEnforces(reason: String) {
     for delay in enforceDelays {
+        let isLast = delay == enforceDelays.last
         DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
-            enforce(reason: "\(reason)+\(Int(delay))s")
+            let ok = enforce(reason: "\(reason)+\(Int(delay))s")
+            if isLast && !ok { startPolling(reason: reason) }
         }
     }
 }
@@ -190,9 +213,11 @@ func watch() {
             } else {
                 // The quitting app can linger in runningApplications for a
                 // moment after didTerminate fires — re-check after a beat.
-                for delay in [1.0, 5.0, 12.0] {
+                let delays = [1.0, 5.0, 12.0]
+                for delay in delays {
                     DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
-                        enforce(reason: "\(event)+\(Int(delay))s")
+                        let ok = enforce(reason: "\(event)+\(Int(delay))s")
+                        if delay == delays.last && !ok { startPolling(reason: event) }
                     }
                 }
             }
